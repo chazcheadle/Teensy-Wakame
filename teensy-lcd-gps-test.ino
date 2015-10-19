@@ -42,7 +42,7 @@ struct
   int elevation;
   int azimuth;
   int snr;
-} sats[MAX_SATELLITES];
+} sats[MAX_SATELLITES], prevSats[MAX_SATELLITES];
 
 long COMP_previousMillis = 0;        // will store last time LED was updated
 long COMP_interval = 100;
@@ -79,12 +79,11 @@ void setup() {
   Wire.onRequest(sendData);
 
   // If your TFT's plastic wrap has a Green Tab, use the following:
-  tft.initR(INITR_GREENTAB); // initialize a ST7735R chip, green tab
+//  tft.initR(INITR_GREENTAB); // initialize a ST7735R chip, green tab
   
   
 //   Use this initializer (uncomment) if you're using a 1.44" TFT
-  tft.initR(INITR_144GREENTAB);   // initialize a ST7735S chip, black tab
-//  Serial.println("Initialized");
+  tft.initR(INITR_144GREENTAB);   // initialize a ST7735S chip, black tabb
 
   // large block of text
   tft.fillScreen(ST7735_BLACK);
@@ -122,8 +121,6 @@ static char printStr(const char *str, int len)
     Serial.print(i<slen ? str[i] : ' ');
   smartDelay(0);
 }
-
-
 
 void loop() {
   unsigned long currentMillis = millis();
@@ -224,62 +221,80 @@ void displayGPSData() {
 
 void getGPSData() {
   while (GPS_Ser.available())
-      gps.encode(GPS_Ser.read());
-      if (totalGPGSVMessages.isUpdated())
+    gps.encode(GPS_Ser.read());
+/*
+    if (totalGPGSVMessages.isUpdated())
+    {
+      for (int i=0; i<4; ++i)
       {
-        for (int i=0; i<4; ++i)
+        int no = atoi(satNumber[i].value());
+        // Serial.print(F("SatNumber is ")); Serial.println(no);
+        if (no >= 1 && no <= MAX_SATELLITES)
         {
-          int no = atoi(satNumber[i].value());
-          // Serial.print(F("SatNumber is ")); Serial.println(no);
-          if (no >= 1 && no <= MAX_SATELLITES)
+          sats[no-1].elevation = atoi(elevation[i].value());
+          sats[no-1].azimuth = atoi(azimuth[i].value());
+          sats[no-1].snr = atoi(snr[i].value());
+          sats[no-1].active = true;
+        }
+      }
+      
+      int totalMessages = atoi(totalGPGSVMessages.value());
+      int currentMessage = atoi(messageNumber.value());
+      if (totalMessages == currentMessage)
+      {
+        Serial.print(F("Sats=")); Serial.print(gps.satellites.value());
+        Serial.print(F(" Nums="));
+        for (int i=0; i<MAX_SATELLITES; ++i)
+          if (sats[i].active)
           {
-            sats[no-1].elevation = atoi(elevation[i].value());
-            sats[no-1].azimuth = atoi(azimuth[i].value());
-            sats[no-1].snr = atoi(snr[i].value());
-            sats[no-1].active = true;
+            Serial.print(i+1);
+            Serial.print(F(" "));
           }
-        }
+        Serial.print(F(" Elevation="));
+        for (int i=0; i<MAX_SATELLITES; ++i)
+          if (sats[i].active)
+          {
+            Serial.print(sats[i].elevation);
+            Serial.print(F(" "));
+          }
+        Serial.print(F(" Azimuth="));
+        for (int i=0; i<MAX_SATELLITES; ++i)
+          if (sats[i].active)
+          {
+            Serial.print(sats[i].azimuth);
+            Serial.print(F(" "));
+          }
         
-        int totalMessages = atoi(totalGPGSVMessages.value());
-        int currentMessage = atoi(messageNumber.value());
-        if (totalMessages == currentMessage)
-        {
-          Serial.print(F("Sats=")); Serial.print(gps.satellites.value());
-          Serial.print(F(" Nums="));
-          for (int i=0; i<MAX_SATELLITES; ++i)
-            if (sats[i].active)
-            {
-              Serial.print(i+1);
-              Serial.print(F(" "));
-            }
-          Serial.print(F(" Elevation="));
-          for (int i=0; i<MAX_SATELLITES; ++i)
-            if (sats[i].active)
-            {
-              Serial.print(sats[i].elevation);
-              Serial.print(F(" "));
-            }
-          Serial.print(F(" Azimuth="));
-          for (int i=0; i<MAX_SATELLITES; ++i)
-            if (sats[i].active)
-            {
-              Serial.print(sats[i].azimuth);
-              Serial.print(F(" "));
-            }
-          
-          Serial.print(F(" SNR="));
-          for (int i=0; i<MAX_SATELLITES; ++i)
-            if (sats[i].active)
-            {
-              Serial.print(sats[i].snr);
-              Serial.print(F(" "));
-            }
-          Serial.println();
-  
-          for (int i=0; i<MAX_SATELLITES; ++i)
-            sats[i].active = false;
-        }
-      } 
+        Serial.print(F(" SNR="));
+        for (int i=0; i<MAX_SATELLITES; ++i)
+          if (sats[i].active)
+          {
+            Serial.print(sats[i].snr);
+            Serial.print(F(" "));
+          }
+        Serial.println();
+
+        for (int i=0; i<MAX_SATELLITES; ++i)
+          sats[i].active = false;
+      }
+    }
+*/
+//    displaySatellite(60.0, 45);
+//    displaySatellite(0.0, 110);
+//    displaySatellite(45.0, 315);
+    
+    sats[0].elevation = 60.0;
+    sats[0].azimuth = 45;
+    sats[0].snr = 0.5;
+    sats[0].active = true;
+    sats[1].elevation = 0.0;
+    sats[1].azimuth = 110.0;
+    sats[1].snr = 0.5;
+    sats[1].active = true;
+    sats[2].elevation = 45.0;
+    sats[2].azimuth = 315;
+    sats[2].snr = 0.5;
+    sats[2].active = true;
 }
 
 static void smartDelay(unsigned long ms)
@@ -426,6 +441,16 @@ void displayCompassNeedle() {
  */
 void displaySatellite(const double& elevation, const double& azimuth) {
   int x, ex, ey;
+
+//  prevSats = sats; 
+  for (int i = 0; i < MAX_SATELLITES; ++i) {
+    tft.setCursor(1,1);
+    if (sats[i].active == true) {
+      tft.println(sats[i].elevation);
+      delay(500);
+    }
+  }
+
   // The distance from the center to the satellite.
   x = round(cos(elevation * PI / 180) * (SATR - 2));  
 
