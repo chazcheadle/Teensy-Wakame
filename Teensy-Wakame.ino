@@ -6,10 +6,7 @@
 #include <Adafruit_Sensor.h>
 #include <Adafruit_HMC5883_U.h>
 
-#define SATX 63
-#define SATY 89
-#define SATR 36
-
+// Initialize SPI pins for ST7735
 #define sclk 13  // SCLK can also use pin 14
 #define miso 12  // MISO can also use pin XXX
 #define mosi 11  // MOSI can also use pin 7
@@ -19,10 +16,17 @@
 #define sdcs 4   // CS for SD card, can use any pin
 
 Adafruit_ST7735 tft = Adafruit_ST7735(cs, dc, mosi, sclk, rst);
+// Custom color definitions
 #define ST7735_DARKGREY 0xC618
+
+// Define Satellite map dimensions and location
+#define SATX 63
+#define SATY 89
+#define SATR 36
 
 // The TinyGPS++ object
 TinyGPSPlus gps;
+
 // Setup UART (Hardware Serial #1 pins 0, 1)
 HardwareSerial GPS_Ser = HardwareSerial();
 
@@ -44,22 +48,19 @@ struct
   int snr;
 } sats[MAX_SATELLITES], prevSats[MAX_SATELLITES];
 
-long COMP_previousMillis = 0;        // will store last time LED was updated
+// Definitions for timing the compass and GPS updates
+long COMP_previousMillis = 0;
 long COMP_interval = 100;
-long GPS_previousMillis = 0;        // will store last time LED was updated
+long GPS_previousMillis = 0;
 long GPS_interval = 1000;
 
-
-// Setup mag sensor
+// Setup mag sensor and variables
 Adafruit_HMC5883_Unified mag = Adafruit_HMC5883_Unified(12345);
-
 bool magPresent = true;
 float headingDegrees, prevHeadingDegrees;
 const char *headingCardinal;
 
 void setup() {
-  // Debug data on hardware serial
-//  Serial.begin(115200);
 
   // GPS data from software serial
   GPS_Ser.begin(9600);
@@ -72,23 +73,19 @@ void setup() {
     azimuth[i].begin(  gps, "GPGSV", 6 + 4 * i); // offsets 6, 10, 14, 18
     snr[i].begin(      gps, "GPGSV", 7 + 4 * i); // offsets 7, 11, 15, 19
   }
-  
+
   // Start i2c
   Wire.begin();
   Wire.onReceive(receiveData);
   Wire.onRequest(sendData);
 
-  // If your TFT's plastic wrap has a Green Tab, use the following:
+  // Set up display
 //  tft.initR(INITR_GREENTAB); // initialize a ST7735R chip, green tab
-  
-  
-//   Use this initializer (uncomment) if you're using a 1.44" TFT
   tft.initR(INITR_144GREENTAB);   // initialize a ST7735S chip, black tabb
 
-  // large block of text
   tft.fillScreen(ST7735_BLACK);
   tft.setRotation(1);
-
+ 
   tft.setCursor(1, 10);
   tft.print("Lat: ");
   tft.setCursor(1, 18);
@@ -102,35 +99,24 @@ void setup() {
   // Start mag sensoring
   if(!mag.begin())
   {
-    /* There was a problem detecting the HMC5883 ... check your connections */
-//    Serial.println("Ooops, no HMC5883 detected ... Check your wiring!");
     magPresent = false;
-    //while(1);
   }
-  
+
   // Draw Satellite map
-  drawSatelliteMap();
+  drawSatelliteMap(true, true, true, true);
 
-}
-
-
-static char printStr(const char *str, int len)
-{
-  int slen = strlen(str);
-  for (int i=0; i<len; ++i)
-    Serial.print(i<slen ? str[i] : ' ');
-  smartDelay(0);
 }
 
 void loop() {
   unsigned long currentMillis = millis();
- 
+
   if (currentMillis - COMP_previousMillis > COMP_interval) {
     COMP_previousMillis = currentMillis;
     getHeadingDegrees();
     // Draw compass needle.
     displayCompassNeedle();
   }
+
   if (millis() > 10000 && gps.charsProcessed() < 10) // uh oh
   {
     tft.setCursor(1,1);
@@ -145,44 +131,56 @@ void loop() {
   if (currentMillis - GPS_previousMillis > GPS_interval) {
     GPS_previousMillis = currentMillis;
     // Print GPS data.
-    displayGPSData();
-  
-    displaySatellite(60.0, 45);
-    displaySatellite(0.0, 110);
-    displaySatellite(45.0, 315);
 
+    // Remove old satellites
+    for (int i=0; i<MAX_SATELLITES; ++i)
+    {
+      displaySatellite(sats[i].elevation, sats[i].azimuth, 0);
+      sats[i].active = false;
+    }
+    drawSatelliteMap(false, false, true, true);
+
+    displayGPSData();
+
+    for (int i=0; i<MAX_SATELLITES; ++i)
+    {
+//      if (sats[i].active)
+//      {
+        displaySatellite(sats[i].elevation, sats[i].azimuth, sats[i].active);
+//      }
+    }
   }
 }
 
-void testdrawtext(const char *text, uint16_t color) {
-  tft.setCursor(0, 0);
-  tft.setTextColor(color, ST7735_BLACK);
-  tft.setTextWrap(true);
-  tft.print(text);
-}
-
 void getHeadingDegrees() {
-  sensors_event_t event; 
+  sensors_event_t event;
   mag.getEvent(&event);
 
   float heading = atan2(event.magnetic.y, event.magnetic.x);
   float declinationAngle = 0.22;
   heading += declinationAngle;
-  
+
   // Correct for when signs are reversed.
   if(heading < 0)
     heading += 2*PI;
-    
+
   // Check for wrap due to addition of declination.
   if(heading > 2*PI)
     heading -= 2*PI;
-   
-  // Convert radians to degrees for readability.
-  headingDegrees = heading * 180/M_PI; 
-  
-//  Serial.print("Heading (degrees): "); Serial.println(headingDegrees);
-  }
 
+  // Convert radians to degrees for readability.
+  headingDegrees = heading * 180/M_PI;
+
+  if (magPresent) {
+    headingCardinal = TinyGPSPlus::cardinal(headingDegrees);
+    tft.setCursor(1, 42);
+    tft.print("Hdg: ");
+    int len  = strlen(headingCardinal);
+    tft.print(headingCardinal);
+    for (int i=len; i<4; ++i)
+      tft.print(' ');
+  }
+}
 
 void displayGPSData() {
 
@@ -205,24 +203,13 @@ void displayGPSData() {
   tft.println(gps.altitude.meters(), 1);
   tft.setCursor(31, 26);
   tft.println(gps.satellites.value());
-
-  if (magPresent) {
-    headingCardinal = TinyGPSPlus::cardinal(headingDegrees);
-    printStr(gps.location.isValid() ? headingCardinal : "*** ",1);
-    tft.setCursor(1, 42);
-    tft.print("Hdg: ");
-    int len  = strlen(headingCardinal);
-    tft.print(headingCardinal);
-    for (int i=len; i<4; ++i)
-      tft.print(' ');
-  }
-
 }
 
 void getGPSData() {
   while (GPS_Ser.available())
     gps.encode(GPS_Ser.read());
-/*
+
+    // Get satellite data
     if (totalGPGSVMessages.isUpdated())
     {
       for (int i=0; i<4; ++i)
@@ -237,130 +224,47 @@ void getGPSData() {
           sats[no-1].active = true;
         }
       }
-      
+
       int totalMessages = atoi(totalGPGSVMessages.value());
       int currentMessage = atoi(messageNumber.value());
       if (totalMessages == currentMessage)
       {
-        Serial.print(F("Sats=")); Serial.print(gps.satellites.value());
-        Serial.print(F(" Nums="));
+//        Serial.print(F("Sats=")); Serial.print(gps.satellites.value());
+//        Serial.print(F(" Nums="));
         for (int i=0; i<MAX_SATELLITES; ++i)
           if (sats[i].active)
           {
-            Serial.print(i+1);
-            Serial.print(F(" "));
+//            Serial.print(i+1);
+//            Serial.print(F(" "));
           }
-        Serial.print(F(" Elevation="));
+//        Serial.print(F(" Elevation="));
         for (int i=0; i<MAX_SATELLITES; ++i)
           if (sats[i].active)
           {
-            Serial.print(sats[i].elevation);
-            Serial.print(F(" "));
+//            Serial.print(sats[i].elevation);
+//            Serial.print(F(" "));
           }
-        Serial.print(F(" Azimuth="));
+//        Serial.print(F(" Azimuth="));
         for (int i=0; i<MAX_SATELLITES; ++i)
           if (sats[i].active)
           {
-            Serial.print(sats[i].azimuth);
-            Serial.print(F(" "));
+//            Serial.print(sats[i].azimuth);
+//            Serial.print(F(" "));
           }
-        
-        Serial.print(F(" SNR="));
+
+//        Serial.print(F(" SNR="));
         for (int i=0; i<MAX_SATELLITES; ++i)
           if (sats[i].active)
           {
-            Serial.print(sats[i].snr);
-            Serial.print(F(" "));
+//            Serial.print(sats[i].snr);
+//            Serial.print(F(" "));
           }
-        Serial.println();
+//        Serial.println();
 
         for (int i=0; i<MAX_SATELLITES; ++i)
           sats[i].active = false;
       }
     }
-*/
-//    displaySatellite(60.0, 45);
-//    displaySatellite(0.0, 110);
-//    displaySatellite(45.0, 315);
-    
-    sats[0].elevation = 60.0;
-    sats[0].azimuth = 45;
-    sats[0].snr = 0.5;
-    sats[0].active = true;
-    sats[1].elevation = 0.0;
-    sats[1].azimuth = 110.0;
-    sats[1].snr = 0.5;
-    sats[1].active = true;
-    sats[2].elevation = 45.0;
-    sats[2].azimuth = 315;
-    sats[2].snr = 0.5;
-    sats[2].active = true;
-}
-
-static void smartDelay(unsigned long ms)
-{
-  unsigned long start = millis();
-  do 
-  {
-    while (GPS_Ser.available())
-      gps.encode(GPS_Ser.read());
-      if (totalGPGSVMessages.isUpdated())
-      {
-        for (int i=0; i<4; ++i)
-        {
-          int no = atoi(satNumber[i].value());
-          // Serial.print(F("SatNumber is ")); Serial.println(no);
-          if (no >= 1 && no <= MAX_SATELLITES)
-          {
-            sats[no-1].elevation = atoi(elevation[i].value());
-            sats[no-1].azimuth = atoi(azimuth[i].value());
-            sats[no-1].snr = atoi(snr[i].value());
-            sats[no-1].active = true;
-          }
-        }
-        
-        int totalMessages = atoi(totalGPGSVMessages.value());
-        int currentMessage = atoi(messageNumber.value());
-        if (totalMessages == currentMessage)
-        {
-          Serial.print(F("Sats=")); Serial.print(gps.satellites.value());
-          Serial.print(F(" Nums="));
-          for (int i=0; i<MAX_SATELLITES; ++i)
-            if (sats[i].active)
-            {
-              Serial.print(i+1);
-              Serial.print(F(" "));
-            }
-          Serial.print(F(" Elevation="));
-          for (int i=0; i<MAX_SATELLITES; ++i)
-            if (sats[i].active)
-            {
-              Serial.print(sats[i].elevation);
-              Serial.print(F(" "));
-            }
-          Serial.print(F(" Azimuth="));
-          for (int i=0; i<MAX_SATELLITES; ++i)
-            if (sats[i].active)
-            {
-              Serial.print(sats[i].azimuth);
-              Serial.print(F(" "));
-            }
-          
-          Serial.print(F(" SNR="));
-          for (int i=0; i<MAX_SATELLITES; ++i)
-            if (sats[i].active)
-            {
-              Serial.print(sats[i].snr);
-              Serial.print(F(" "));
-            }
-          Serial.println();
-  
-          for (int i=0; i<MAX_SATELLITES; ++i)
-            sats[i].active = false;
-        }
-      } 
-    
-  } while (millis() - start < ms);
 }
 
 static void getTime(TinyGPSTime &t)
@@ -375,7 +279,6 @@ static void getTime(TinyGPSTime &t)
     sprintf(sz, "%02d:%02d:%02d  ", t.hour(), t.minute(), t.second());
     tft.print(sz);
   }
-  smartDelay(0);
 }
 
 static void getDate(TinyGPSDate &d)
@@ -386,28 +289,34 @@ static void getDate(TinyGPSDate &d)
     sprintf(sz, "%02d/%02d/%02d ", d.month(), d.day(), d.year());
     tft.print(sz);
   }
-  smartDelay(0);
 }
-
-//  tft.drawCircle(63, 89, 36, ST7735_WHITE);
-//  tft.drawCircle(63, 89, 18, ST7735_WHITE);
-//  tft.drawFastVLine(63, 53, 72, ST7735_WHITE);
-//  tft.drawFastHLine(27, 89, 72, ST7735_WHITE);
 
 /**
  * Draw a circular map that represents the plane upon which satellites can
  * be projected in a top-down 2D view.
  */
-void drawSatelliteMap() {
+void drawSatelliteMap(bool fill, bool outer, bool inner, bool crosshairs) {
   // clear the map
-  tft.fillRect(SATX - SATR, SATY - SATR, SATX + SATR, SATY + SATR, ST7735_BLACK); 
+  if (fill)
+  {
+    tft.fillRect(SATX - SATR, SATY - SATR, SATX + SATR, SATY + SATR, ST7735_BLACK);
+  }
   // Draw outer ring
-  tft.drawCircle(SATX, SATY, SATR, ST7735_WHITE);
+  if (outer)
+  {
+    tft.drawCircle(SATX, SATY, SATR, ST7735_WHITE);
+  }
   // Draw inner ring
-  tft.drawCircle(SATX, SATY, round(SATR/2), ST7735_DARKGREY);
+  if (inner)
+  {
+    tft.drawCircle(SATX, SATY, round(SATR/2), ST7735_DARKGREY);
+  }
   // Draw crosshairs
-  tft.drawFastVLine(SATX, SATY - SATR, SATR*2, ST7735_DARKGREY);
-  tft.drawFastHLine(SATX - SATR, SATY, SATR*2, ST7735_DARKGREY);
+  if (crosshairs)
+  {
+    tft.drawFastVLine(SATX, SATY - SATR, SATR*2, ST7735_DARKGREY);
+    tft.drawFastHLine(SATX - SATR, SATY, SATR*2, ST7735_DARKGREY);
+  }
 }
 
 /**
@@ -435,32 +344,37 @@ void displayCompassNeedle() {
 }
 
 /**
- * Display satellites on the satellite map according to where they appear on a 
+ * Display satellites on the satellite map according to where they appear on a
  * 2D plan.
  * The current heading is taken into account.
  */
-void displaySatellite(const double& elevation, const double& azimuth) {
+void displaySatellite(const double& elevation, const double& azimuth, int active) {
   int x, ex, ey;
 
-//  prevSats = sats; 
-  for (int i = 0; i < MAX_SATELLITES; ++i) {
-    tft.setCursor(1,1);
-    if (sats[i].active == true) {
-      tft.println(sats[i].elevation);
-      delay(500);
-    }
-  }
+//  for (int i = 0; i < MAX_SATELLITES; ++i) {
+//     tft.setCursor(1,1);
+//    if (sats[i].active == true) {
+//      tft.println(sats[i].elevation);
+//      delay(500);
+//    }
+//  }
 
   // The distance from the center to the satellite.
-  x = round(cos(elevation * PI / 180) * (SATR - 2));  
+  x = round(cos(elevation * PI / 180) * (SATR - 2));
 
   // The X and Y coordinates of the satellite on the map.
   ex = round(sin((azimuth - (double)headingDegrees) * PI / 180) * x);
   ey = round(cos((azimuth - (double)headingDegrees) * PI / 180) * x);
 
    // Draw demo satellites
-  tft.fillCircle(SATX + ex, SATY - ey, 2, ST7735_GREEN);
-
+  if (active)
+  {
+    tft.fillCircle(SATX + ex, SATY - ey, 2, ST7735_GREEN);
+  }
+  else 
+  {
+    tft.fillCircle(SATX + ex, SATY - ey, 2, ST7735_BLACK);
+  }
 }
 
 void receiveData(int byteCount) {
