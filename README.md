@@ -24,3 +24,7 @@ Current status:
 Background:
 Original development started on an ESP8266, but due to I/O constraints the Teensy 3.2 was chosen.
 The cost of parts so far is around $50, but that can be reduced after prototyping with discrete components.
+
+Video demo:
+Here is a short video demonstratng the satellite map with acquired satellites. No fix had yet been acquired.
+https://www.youtube.com/edit?o=U&feature=vm&video_id=ZwM4uvmy9Ao
